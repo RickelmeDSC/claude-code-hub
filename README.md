@@ -65,9 +65,12 @@ Those are real frames rendered from the test fixtures. `ch --preview` draws them
 ## Install
 
 ```powershell
-git clone https://github.com/<you>/claude-hub.git "$env:USERPROFILE\.claude-hub"
+git clone https://github.com/RickelmeDSC/claude-code-hub.git "$env:USERPROFILE\.claude-hub"
 & "$env:USERPROFILE\.claude-hub\install.ps1"
 ```
+
+The clone target is `.claude-hub` on purpose: that is where the tool expects to live,
+and the command it installs is `ch`.
 
 The installer adds a `ch` function to your `$PROFILE`, between markers, and is
 idempotent. If your execution policy still blocks local scripts it says so — and that
