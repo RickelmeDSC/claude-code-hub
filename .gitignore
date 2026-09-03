@@ -1,0 +1,7 @@
+# Rebuilt on demand by `ch --reindex`. It also holds titles and paths of your
+# own sessions, so it must never be committed.
+cache/
+
+# Windows noise
+Thumbs.db
+desktop.ini

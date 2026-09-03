@@ -1,0 +1,12 @@
+﻿{
+  "ScanRoots": [
+    "%USERPROFILE%/Documents/GitHub",
+    "%USERPROFILE%"
+  ],
+  "CloneRoot": "%USERPROFILE%/Documents/GitHub",
+  "RepoCacheMinutes": 30,
+  "MemoryPreviewLines": 4,
+  "Language": "auto"
+}
+
+
