@@ -98,5 +98,5 @@ function Get-ChMemoryBody {
 
 function Get-ChMemoryCount {
     param([string]$Path)
-    return (Get-ChMemoryEntries -Path $Path).Count
+    return @(Get-ChMemoryEntries -Path $Path).Count
 }

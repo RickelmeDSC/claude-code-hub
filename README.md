@@ -155,11 +155,15 @@ your conversations.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `ScanRoots` | `~/Documents/GitHub`, `~` | where to look for clones (depth 1) |
+| `ScanRoots` | `~/Documents/GitHub`, `~` | where to look for clones (one level deep each) |
 | `CloneRoot` | `~/Documents/GitHub` | destination when cloning from the panel |
 | `RepoCacheMinutes` | `30` | how long the `gh` answer stays fresh |
 | `MemoryPreviewLines` | `4` | memory entries shown on the repository screen |
 | `Language` | `auto` | `en`, `pt`, or `auto` to follow the console culture |
+
+Discovery goes one level deep per scan root, so a repository nested inside another one
+is not found by accident. If you keep repositories inside a monorepo, add that folder as
+its own scan root — sessions then land on the innermost repository that contains them.
 
 ## Performance
 
@@ -186,10 +190,22 @@ the thing for real.
 ch --selftest
 ```
 
-164 assertions against a synthetic world built in a temp folder: fake `.jsonl`
-transcripts, fake `.git` directories with loose refs, packed refs and a worktree, and a
-cached GitHub answer. **The suite never reads your real sessions and never touches the
-network**, so it passes on a machine that has never run Claude Code.
+172 assertions against a synthetic world built in a temp folder: fake `.jsonl`
+transcripts, fake `.git` directories with loose refs, packed refs, a worktree and a
+nested repository, and a cached GitHub answer. **The suite never reads your real sessions
+and never touches the network**, so it passes on a machine that has never run Claude
+Code.
+
+"The tests pass" and "the tests check anything" are different claims, so there is a
+second script that verifies the first:
+
+```powershell
+powershell -File tests\Mutants.ps1
+```
+
+It copies the repository, breaks one specific behaviour at a time, and runs the suite
+against the broken copy. A mutation the suite fails to notice is a blind spot. All 12
+are currently caught — two of them only after this exercise found the gaps.
 
 ## Requirements
 

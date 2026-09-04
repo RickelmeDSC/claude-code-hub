@@ -152,7 +152,7 @@ $se = Read-ChSessionFile -File (Get-Item -LiteralPath $fx.SessionEmpty)
 Assert-Equal 'a session with no assistant turn is labelled' '(no conversation)' $se.Title
 
 $idx = Get-ChSessionIndex -Force
-Assert-Equal 'index finds every session' 6 $idx.Count
+Assert-Equal 'index finds every session' 7 $idx.Count
 Assert-Equal 'no subagent transcript in the index' 0 @($idx | Where-Object { $_.Path -like '*\subagents\*' }).Count
 Assert-Equal 'no session is left untitled' 0 @($idx | Where-Object { $_.Title -eq '(untitled)' }).Count
 
@@ -176,7 +176,7 @@ Assert-Equal 'another host is not GitHub' $null (ConvertTo-ChRepoSlug 'https://g
 Assert-Equal 'empty url is null' $null (ConvertTo-ChRepoSlug '')
 
 $clones = @(Get-ChLocalClones)
-Assert-Equal 'finds every clone and skips the plain folder' 4 $clones.Count
+Assert-Equal 'finds every clone and skips the plain folder' 5 $clones.Count
 
 $ca = @($clones | Where-Object { $_.Name -eq 'alpha' })[0]
 Assert-Equal 'remote read from .git/config' 'demo-user/alpha' $ca.FullName
@@ -253,6 +253,35 @@ Assert-True 'memory body is read' ((Get-ChMemoryBody -FullPath $mem[0].FullPath)
 Assert-Equal 'a path with no memory returns empty' 0 @(Get-ChMemoryEntries -Path $fx.Gamma).Count
 
 # ============================================================================
+Start-TBlock 'Convention - collection callers wrap with @()'
+
+# PowerShell unrolls a one-element array on return, so a function that finds
+# exactly one thing hands back the bare object and .Count comes back empty. The
+# convention here is that the CALLER wraps. That is invisible to a normal test -
+# the test wraps too - so it is checked against the source instead.
+$guarded = @('Select-ChSessions', 'Get-ChSessionCatalog', 'Get-ChMemoryEntries')
+$offenders = New-Object System.Collections.Generic.List[string]
+foreach ($file in @('lib\ChUI.ps1', 'lib\ChMemory.ps1', 'lib\ChRepos.ps1', 'lib\ChIndex.ps1', 'ch.ps1')) {
+    $full = Join-Path $script:ChTestRoot $file
+    if (-not (Test-Path -LiteralPath $full)) { continue }
+    $srcLines = [System.IO.File]::ReadAllLines($full, [System.Text.Encoding]::UTF8)
+    for ($i = 0; $i -lt $srcLines.Count; $i++) {
+        $line = $srcLines[$i]
+        if ($line -match '^\s*#') { continue }
+        # a module-load guard mentions the name without calling it
+        if ($line -match 'Test-Path Function:') { continue }
+        foreach ($fn in $guarded) {
+            if ($line -notmatch [regex]::Escape($fn)) { continue }
+            if ($line -match ('^\s*function\s+' + [regex]::Escape($fn))) { continue }
+            if ($line -match ('@\(\s*' + [regex]::Escape($fn))) { continue }
+            $offenders.Add("$file`:$($i + 1)  $($line.Trim())")
+        }
+    }
+}
+Assert-Equal 'every guarded call is wrapped in @()' 0 $offenders.Count
+foreach ($o in $offenders) { Write-Host "         $o" -ForegroundColor DarkRed }
+
+# ============================================================================
 Start-TBlock 'UI - pure functions'
 
 $esc = [char]27
@@ -289,6 +318,16 @@ $rows = @(Join-ChSessionsToRepos -Sessions (Get-ChSessionIndex) -Repos (Get-ChRe
 # rolls up into the parent, which is why matching uses the cwd recorded inside
 # the file and not the project folder name.
 Assert-Equal 'subfolder rolls up into the parent repo' 4 (@($rows | Where-Object { $_.Name -eq 'alpha' })[0]).Sessions.Count
+# ui lives inside alpha. A session under ui matches both paths, and the longest
+# prefix has to win - otherwise the work lands on the wrong repository. Mutation
+# testing found this rule was never exercised, because every other fixture
+# repository is a sibling.
+$rUi = @($rows | Where-Object { $_.Name -eq 'ui' })
+Assert-Equal 'the nested repository is in the list' 1 $rUi.Count
+Assert-Equal 'a session inside the nested repo belongs to it' 1 $rUi[0].Sessions.Count
+Assert-Equal 'and it is the right session' 'Wire the design tokens' $rUi[0].Sessions[0].Title
+Assert-True 'the parent repo does not swallow it' (@($rows | Where-Object { $_.Name -eq 'alpha' })[0].Sessions.Title -notcontains 'Wire the design tokens') 'alpha took the nested session'
+Assert-Equal 'the nested path resolves to the nested repo' 'ui' (Find-ChRowForPath -Rows $rows -Path (Join-Path $fx.Nested 'src')).Name
 Assert-Equal 'beta keeps its own session' 1 (@($rows | Where-Object { $_.Name -eq 'beta' })[0]).Sessions.Count
 $rOther = @($rows | Where-Object { $_.Kind -eq 'other' })
 Assert-Equal 'a session outside any repo becomes another place' 1 $rOther.Count
@@ -298,7 +337,7 @@ Assert-True 'ordered by most recent activity' ($rows[0].LastActivity -ge $rows[1
 
 # --- global session search ---
 $cat = @(Get-ChSessionCatalog -Rows $rows)
-Assert-Equal 'catalog covers every session' 6 $cat.Count
+Assert-Equal 'catalog covers every session' 7 $cat.Count
 Assert-Equal 'every entry knows its repository' 0 @($cat | Where-Object { -not $_.RepoName }).Count
 Assert-Equal 'empty query returns everything' $cat.Count @(Select-ChSessions -Catalog $cat -Query '').Count
 # Regression: `return @(...)` with a single match hands back the object instead

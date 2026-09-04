@@ -175,6 +175,10 @@ function New-ChFixtures {
     $beta = Join-Path $code 'beta'
     $gamma = Join-Path $code 'gamma'
     $wt = Join-Path $code 'alpha-worktree'
+    # A repository nested inside another one. This is the only arrangement in
+    # which the longest-prefix rule actually decides anything, so without it
+    # the rule is untested.
+    $nested = Join-Path $alpha 'packages\ui'
     $naoRepo = Join-Path $code 'not-a-repo'
     [void][System.IO.Directory]::CreateDirectory($naoRepo)
 
@@ -193,6 +197,9 @@ function New-ChFixtures {
         -Branch 'feature/x' -LocalSha $shaA -RemoteSha $null -RefStyle 'loose'
     # a worktree of alpha: local HEAD, refs in the main repository
     New-ChFxWorktree -Path $wt -MainRepoPath $alpha -Name 'alpha-worktree' -Branch 'main'
+    # nested inside alpha, with a remote of its own
+    New-ChFxGitRepo -Path $nested -RemoteUrl 'https://github.com/demo-user/ui.git' `
+        -Branch 'main' -LocalSha $shaA -RemoteSha $shaA -RefStyle 'loose'
 
     # --- sessions ---
     # The project folder name is the slug of the real path, the same way Claude
@@ -240,6 +247,13 @@ function New-ChFixtures {
     [System.IO.File]::WriteAllLines($sub, @((New-ChFxJsonl @{ type = 'ai-title'; aiTitle = 'I am a subagent' })),
         (New-Object System.Text.UTF8Encoding($false)))
 
+    # runs inside the nested repository: has to land on ui, not on alpha
+    New-ChFxSession -Path (Join-Path $projects ((ConvertTo-ChProjectSlug $nested) + '\77777777-7777-7777-7777-777777777777.jsonl')) `
+        -Cwd (Join-Path $nested 'src') -Branch 'main' -AiTitle 'Wire the design tokens' -Start $base.AddDays(5) -MinutesLong 25 -Turns @(
+            @{ Role = 'user'; Text = 'wire the design tokens into the component library build' }
+            @{ Role = 'assistant'; Text = 'ok' }
+        )
+
     New-ChFxSession -Path (Join-Path $projects "$slugBeta\55555555-5555-5555-5555-555555555555.jsonl") `
         -Cwd $beta -Branch 'main' -AiTitle 'Add pagination to the API' -Start $base.AddDays(3) -MinutesLong 45 -Turns @(
             @{ Role = 'user'; Text = 'add cursor pagination to the list endpoint of the public API' }
@@ -278,6 +292,7 @@ button someone presses.
         @{ FullName = 'demo-user/alpha'; Name = 'alpha'; Owner = 'demo-user'; Private = $false; Archived = $false; PushedAt = '2026-08-14T12:00:00Z'; Url = 'https://github.com/demo-user/alpha'; Description = 'Demo repository' }
         @{ FullName = 'demo-user/beta'; Name = 'beta'; Owner = 'demo-user'; Private = $false; Archived = $false; PushedAt = '2026-08-13T12:00:00Z'; Url = 'https://github.com/demo-user/beta'; Description = $null }
         @{ FullName = 'demo-user/gamma'; Name = 'gamma'; Owner = 'demo-user'; Private = $false; Archived = $false; PushedAt = '2026-08-12T12:00:00Z'; Url = 'https://github.com/demo-user/gamma'; Description = $null }
+        @{ FullName = 'demo-user/ui'; Name = 'ui'; Owner = 'demo-user'; Private = $false; Archived = $false; PushedAt = '2026-08-15T12:00:00Z'; Url = 'https://github.com/demo-user/ui'; Description = $null }
         @{ FullName = 'demo-user/never-cloned'; Name = 'never-cloned'; Owner = 'demo-user'; Private = $false; Archived = $false; PushedAt = '2026-08-11T12:00:00Z'; Url = 'https://github.com/demo-user/never-cloned'; Description = $null }
         @{ FullName = 'demo-user/old-thing'; Name = 'old-thing'; Owner = 'demo-user'; Private = $false; Archived = $true; PushedAt = '2025-01-01T12:00:00Z'; Url = 'https://github.com/demo-user/old-thing'; Description = $null }
         @{ FullName = 'demo-user/secret-lab'; Name = 'secret-lab'; Owner = 'demo-user'; Private = $true; Archived = $false; PushedAt = '2026-01-01T12:00:00Z'; Url = 'https://github.com/demo-user/secret-lab'; Description = $null }
@@ -298,6 +313,7 @@ button someone presses.
         Beta         = $beta
         Gamma        = $gamma
         Worktree     = $wt
+        Nested       = $nested
         NotARepo     = $naoRepo
         SlugAlpha    = $slugAlpha
         SlugBeta     = $slugBeta
@@ -322,7 +338,12 @@ function Use-ChFixtures {
     $global:ChProjectDirIndex = $null
     $global:ChGitStatusCache = @{}
     $global:ChConfigCached = [pscustomobject]@{
-        ScanRoots          = @($Fx.Code)
+        # Two scan roots, the second pointing inside the first repository. Clone
+        # discovery is one level deep per root, so this is how a monorepo with
+        # nested repositories is actually configured - and it is the only way
+        # two candidate paths can both match one session, which is what the
+        # longest-prefix rule exists to settle.
+        ScanRoots          = @($Fx.Code, (Split-Path -Parent $Fx.Nested))
         CloneRoot          = $Fx.Code
         RepoCacheMinutes   = 600
         MemoryPreviewLines = 4

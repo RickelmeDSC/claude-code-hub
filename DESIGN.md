@@ -126,6 +126,25 @@ Result: cold index 3.1 s to 217 ms. A warm open of the panel costs ~640 ms with 
 local clones, of which the session index is only ~70 ms — the rest is the repository
 scan, which grows with the number of clones rather than with the size of the history.
 
+## Verifying the tests, not just running them
+
+A green suite proves nothing on its own. `tests/Mutants.ps1` copies the repository,
+breaks one behaviour at a time, and runs the suite against the broken copy. Anything the
+suite fails to notice is a blind spot.
+
+The first run caught 10 of 12. The two survivors were worth the exercise:
+
+- **The longest-prefix rule was never exercised.** Every fixture repository was a
+  sibling of the others, and the rule only decides anything when one repository sits
+  inside another. Adding a nested repository — reachable, as in real life, by giving it
+  its own scan root — turned five passing assertions into five that can actually fail.
+- **A caller forgetting `@()` was invisible.** The convention is that callers wrap, and
+  the tests wrapped too, so the omission that shipped could not be caught by any normal
+  assertion. It is now checked against the source: the guarded call sites are read from
+  the files themselves and asserted to be wrapped.
+
+All 12 are caught today. The number is not the point — the two it found are.
+
 ## Rendering
 
 One rule makes the box impossible to break: **every line is measured with the ANSI
