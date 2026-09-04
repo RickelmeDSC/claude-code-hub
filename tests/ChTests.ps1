@@ -270,7 +270,11 @@ Assert-Equal 'duration in hours' '2h14' (Format-ChDuration ([timespan]::FromMinu
 Assert-Equal 'duration in days' '11d' (Format-ChDuration ([timespan]::FromDays(11)))
 Assert-Equal 'very short duration' '<1min' (Format-ChDuration ([timespan]::FromSeconds(20)))
 
-Assert-Equal 'truncation with ellipsis' 'abcdefgh...' (Limit-ChText 'abcdefghijklmno' 11)
+# the ellipsis is a glyph, so the assertion checks the shape, not the character
+$cut = Limit-ChText 'abcdefghijklmno' 11
+Assert-Equal 'truncation fits the width exactly' 11 $cut.Length
+Assert-True 'truncation keeps the start' ($cut.StartsWith('abcdefgh')) $cut
+Assert-True 'truncation ends with the ellipsis' ($cut.EndsWith([string]$global:G.Ellipsis)) $cut
 Assert-Equal 'short text is untouched' 'abc' (Limit-ChText 'abc' 11)
 $colored = "$esc[36mabcdefghij$esc[0m"
 Assert-Equal 'ANSI truncation counts only visible chars' 4 (Get-ChVisibleLength (Limit-ChAnsi $colored 4))

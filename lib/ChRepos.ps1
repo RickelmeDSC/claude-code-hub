@@ -141,26 +141,31 @@ function Get-ChRefSha {
     param([string]$GitDir, [string]$Ref)
     if ([string]::IsNullOrWhiteSpace($Ref)) { return $null }
 
-    $places = New-Object System.Collections.Generic.List[string]
-    $places.Add($GitDir)
-    $common = Get-ChCommonGitDir -GitDir $GitDir
-    if ($common -and $common -ne $GitDir) { $places.Add($common) }
+    # The common directory is only resolved when the ref was not found where it
+    # normally lives. Almost no clone is a worktree, and looking for commondir
+    # up front made every repository pay for the rare case.
+    $sha = Read-ChRefFrom -Dir $GitDir -Ref $Ref
+    if ($sha) { return $sha }
 
-    foreach ($dir in $places) {
-        $loose = Join-Path $dir ($Ref -replace '/', '\')
-        if ([System.IO.File]::Exists($loose)) {
-            try { return ([System.IO.File]::ReadAllText($loose)).Trim() } catch { }
-        }
+    $common = Get-ChCommonGitDir -GitDir $GitDir
+    if ($common -and $common -ne $GitDir) { return Read-ChRefFrom -Dir $common -Ref $Ref }
+    return $null
+}
+
+function Read-ChRefFrom {
+    # One directory, both storage forms: a loose file first, then packed-refs.
+    param([string]$Dir, [string]$Ref)
+    $loose = Join-Path $Dir ($Ref -replace '/', '\')
+    if ([System.IO.File]::Exists($loose)) {
+        try { return ([System.IO.File]::ReadAllText($loose)).Trim() } catch { }
     }
-    foreach ($dir in $places) {
-        $packed = Join-Path $dir 'packed-refs'
-        if (-not [System.IO.File]::Exists($packed)) { continue }
-        try { $lines = [System.IO.File]::ReadAllLines($packed) } catch { continue }
-        foreach ($l in $lines) {
-            if ($l.Length -eq 0 -or $l[0] -eq '#' -or $l[0] -eq '^') { continue }
-            $p = $l -split ' ', 2
-            if ($p.Count -eq 2 -and $p[1].Trim() -eq $Ref) { return $p[0].Trim() }
-        }
+    $packed = Join-Path $Dir 'packed-refs'
+    if (-not [System.IO.File]::Exists($packed)) { return $null }
+    try { $lines = [System.IO.File]::ReadAllLines($packed) } catch { return $null }
+    foreach ($l in $lines) {
+        if ($l.Length -eq 0 -or $l[0] -eq '#' -or $l[0] -eq '^') { continue }
+        $p = $l -split ' ', 2
+        if ($p.Count -eq 2 -and $p[1].Trim() -eq $Ref) { return $p[0].Trim() }
     }
     return $null
 }

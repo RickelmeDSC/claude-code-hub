@@ -122,7 +122,9 @@ PowerShell 5.1's `ConvertFrom-Json` **converts anything that looks like a date i
 `DateTime`**, so the comparison never matched and the index reparsed 145 MB on every
 single open. The self-test now asserts that a warm run reparses exactly zero files.
 
-Result: cold index 3.1 s → 217 ms; a repeat open of the panel ~440 ms.
+Result: cold index 3.1 s to 217 ms. A warm open of the panel costs ~640 ms with 16
+local clones, of which the session index is only ~70 ms — the rest is the repository
+scan, which grows with the number of clones rather than with the size of the history.
 
 ## Rendering
 

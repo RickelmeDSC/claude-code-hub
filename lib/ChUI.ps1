@@ -29,10 +29,11 @@ $global:C = @{
 # alignment. The legacy console does not, so there it falls back to ASCII.
 if ($env:WT_SESSION) {
     $global:G = @{
-        TL = [char]0x250C; TR = [char]0x2510; BL = [char]0x2514; BR = [char]0x2518
+        TL = [char]0x256D; TR = [char]0x256E; BL = [char]0x2570; BR = [char]0x256F
         H  = [char]0x2500; V  = [char]0x2502
         Sel = [char]0x25B8; Yes = [char]0x2713; No = [char]0x00B7; Dot = [char]0x2022
         Up = [char]0x2191; Warn = [char]0x25CF
+        Track = [char]0x250A; Thumb = [char]0x2503; Ellipsis = [char]0x2026
     }
 } else {
     $global:G = @{
@@ -40,6 +41,7 @@ if ($env:WT_SESSION) {
         H  = '-'; V  = '|'
         Sel = '>'; Yes = '+'; No = '.'; Dot = '*'
         Up = '^'; Warn = 'o'
+        Track = ':'; Thumb = '#'; Ellipsis = '...'
     }
 }
 
@@ -75,8 +77,49 @@ function Limit-ChText {
     if ($null -eq $Text) { return '' }
     if ($Max -le 0) { return '' }
     if ($Text.Length -le $Max) { return $Text }
-    if ($Max -le 3) { return $Text.Substring(0, $Max) }
-    return ($Text.Substring(0, $Max - 3) + '...')
+    $e = [string]$global:G.Ellipsis
+    if ($Max -le $e.Length) { return $Text.Substring(0, $Max) }
+    return ($Text.Substring(0, $Max - $e.Length) + $e)
+}
+
+function Get-ChScrollGlyph {
+    # One character of a right-edge scrollbar for the row at $Row. Returns a
+    # space when everything already fits, so the column width never changes and
+    # the list does not jump when a scrollbar appears.
+    param([int]$Row, [int]$Visible, [int]$Total, [int]$Scroll)
+    if ($Total -le $Visible -or $Visible -le 0) { return ' ' }
+    $size = [Math]::Max(1, [int][Math]::Round($Visible * $Visible / [double]$Total))
+    $span = $Visible - $size
+    $maxScroll = $Total - $Visible
+    $start = 0
+    if ($maxScroll -gt 0) { $start = [int][Math]::Round($span * $Scroll / [double]$maxScroll) }
+    if ($Row -ge $start -and $Row -lt ($start + $size)) { return [string]$global:G.Thumb }
+    return [string]$global:G.Track
+}
+
+function Get-ChDateColour {
+    # Recency at a glance: what happened today stands out, what is old recedes.
+    param([datetime]$When)
+    if ($null -eq $When) { return $global:C.Dim }
+    $days = ((Get-Date).Date - $When.Date).TotalDays
+    if ($days -le 1) { return $global:C.Cyan }
+    if ($days -le 7) { return $global:C.White }
+    return $global:C.Dim
+}
+
+function New-ChSectionHeading {
+    # A heading that carries a rule to the right edge, so sections read as
+    # sections without spending an extra line on a separator.
+    param([string]$Text, [int]$Inner, [string]$Count = '')
+    $label = '  ' + $global:C.Bold + $Text + $global:C.Reset
+    $plain = '  ' + $Text
+    if ($Count) {
+        $label += $global:C.Dim + ' ' + $Count
+        $plain += ' ' + $Count
+    }
+    $fill = $Inner - $plain.Length - 3
+    if ($fill -lt 1) { return $label }
+    return $label + $global:C.Dim + ' ' + ([string]$global:G.H * $fill) + $global:C.Reset
 }
 
 function Limit-ChAnsi {
@@ -368,19 +411,27 @@ function Get-ChDetailListHeight {
 }
 
 function New-ChRow {
-    param([string]$Content, [int]$Width, [switch]$Selected)
+    param([string]$Content, [int]$Width, [switch]$Selected, [string]$ScrollGlyph = '')
     $inner = $Width - 2
+    # The scrollbar lives outside the selection highlight, so the bar stays
+    # readable on the selected row instead of being swallowed by it.
+    $reserve = 0
+    if ($ScrollGlyph) { $reserve = 2 }
+    $target = $inner - $reserve
+    if ($target -lt 1) { $target = 1 }
+
     if ($Selected) { $Content = $global:ChAnsiRegex.Replace($Content, '') }
     $vis = Get-ChVisibleLength $Content
-    if ($vis -gt $inner) {
-        $Content = Limit-ChAnsi -Text $Content -Max $inner
-        $vis = $inner
+    if ($vis -gt $target) {
+        $Content = Limit-ChAnsi -Text $Content -Max $target
+        $vis = $target
     }
-    $pad = $inner - $vis
+    $pad = $target - $vis
     if ($pad -lt 0) { $pad = 0 }
     $v = $global:C.Dim + $global:G.V + $global:C.Reset
     $body = $Content + $global:C.Reset + (' ' * $pad)
     if ($Selected) { $body = $global:C.Sel + $Content + (' ' * $pad) + $global:C.Reset }
+    if ($ScrollGlyph) { $body += ' ' + $global:C.Dim + $ScrollGlyph + $global:C.Reset }
     return $v + $body + $v
 }
 
@@ -392,24 +443,30 @@ function Build-ChListLines {
     $inner = $Width - 2
     $lines = New-Object System.Collections.Generic.List[string]
 
-    $right = $Owner
-    if ($global:ChReposOffline) { $right = $global:T.offline }
+    $sessTotal = 0
+    foreach ($r in $Rows) { $sessTotal += $r.Sessions.Count }
+    $sep = ' ' + $global:G.Dot + ' '
+    $word = 'sessions'
+    if ($global:ChLang -eq 'pt') { $word = 'sessoes' }
+    $right = "$($Rows.Count) repos$sep$sessTotal $word"
+    if ($Owner) { $right = $Owner + $sep + $right }
+    if ($global:ChReposOffline) { $right = $global:T.offline + $sep + $right }
     $lines.Add((New-ChTopBorder -Left 'CLAUDE HUB' -Right $right -Width $Width))
 
     # Column widths defined once and used by both the header and the rows: the
     # only way to keep the two genuinely aligned.
-    $markW = 3; $gapW = 2; $localW = 4; $sessW = 6; $dateW = 12
+    $markW = 3; $gapW = 2; $localW = 4; $sessW = 6; $dateW = 12; $barW = 2
     # the branch column only appears when there is room; on a narrow terminal it
     # would steal from the repository name, which matters more
     $branchW = 0
     if ($inner -ge 88) { $branchW = 20 }
-    $nameW = $inner - ($markW + $gapW + $localW + $branchW + $sessW + $dateW)
+    $nameW = $inner - ($markW + $gapW + $localW + $branchW + $sessW + $dateW + $barW)
     if ($nameW -lt 14) { $nameW = 14 }
 
     $hdr = (' ' * $markW) + $global:T.colRepo.PadRight($nameW) + (' ' * $gapW) + ''.PadRight($localW)
     if ($branchW -gt 0) { $hdr += $global:T.colBranch.PadRight($branchW) }
     $hdr += $global:T.colSess.PadRight($sessW) + $global:T.colWhen
-    $lines.Add((New-ChRow -Content ($global:C.Dim + (Limit-ChText $hdr $inner)) -Width $Width))
+    $lines.Add((New-ChRow -Content ($global:C.Dim + (Limit-ChText $hdr ($inner - $barW))) -Width $Width -ScrollGlyph ' '))
     $lines.Add((New-ChRow -Content '' -Width $Width))
 
     $listHeight = $Height - 8
@@ -425,7 +482,7 @@ function Build-ChListLines {
     for ($i = $Scroll; $i -lt [Math]::Min($Rows.Count, $Scroll + $listHeight); $i++) {
         $r = $Rows[$i]
         if ($r.Kind -eq 'other' -and $lastKind -eq 'repo') {
-            $lines.Add((New-ChRow -Content ($global:C.Dim + '  ' + ([string]$global:G.H * 3) + (' ' + $global:T.otherPlaces)) -Width $Width))
+            $lines.Add((New-ChRow -Content ($global:C.Dim + '  ' + ([string]$global:G.H * 3) + (' ' + $global:T.otherPlaces)) -Width $Width -ScrollGlyph ' '))
         }
         $lastKind = $r.Kind
 
@@ -468,8 +525,9 @@ function Build-ChListLines {
         $gap = ' ' * $gapW
         $plain = $marker + $namePart + $gap + $local.PadRight($localW) +
                  $branch.PadRight($branchW) + $ns.PadRight($sessW) + $when
+        $bar = Get-ChScrollGlyph -Row ($i - $Scroll) -Visible $listHeight -Total $Rows.Count -Scroll $Scroll
         if ($i -eq $Index) {
-            $lines.Add((New-ChRow -Content (Limit-ChText $plain $inner) -Width $Width -Selected))
+            $lines.Add((New-ChRow -Content (Limit-ChText $plain ($inner - $barW)) -Width $Width -Selected -ScrollGlyph $bar))
         } else {
             $nameColor = $global:C.White
             if ($r.Kind -eq 'other') { $nameColor = $global:C.Dim }
@@ -479,8 +537,8 @@ function Build-ChListLines {
                        $cloneColor + $local.PadRight($localW) + $global:C.Reset +
                        $global:C.Dim + $branch.PadRight($branchW) + $global:C.Reset +
                        $global:C.Cyan + $ns.PadRight($sessW) + $global:C.Reset +
-                       $global:C.Dim + $when + $global:C.Reset
-            $lines.Add((New-ChRow -Content $content -Width $Width))
+                       (Get-ChDateColour $r.LastActivity) + $when + $global:C.Reset
+            $lines.Add((New-ChRow -Content $content -Width $Width -ScrollGlyph $bar))
         }
     }
 
@@ -558,7 +616,12 @@ function Build-ChDetailLines {
     $listHeight = Get-ChDetailListHeight -Height $Height -MemShow $memShown -HasDescription ([bool]$Row.Description)
 
     $sessions = @($Row.Sessions)
-    $lines.Add((New-ChRow -Content ('  ' + $global:C.Bold + $global:T.secSessions + $global:C.Reset + $global:C.Dim + " ($($sessions.Count))") -Width $Width))
+    $range = "($($sessions.Count))"
+    if ($sessions.Count -gt $listHeight) {
+        $last = [Math]::Min($sessions.Count, $Scroll + $listHeight)
+        $range = "$($Scroll + 1)-$last / $($sessions.Count)"
+    }
+    $lines.Add((New-ChRow -Content (New-ChSectionHeading -Text $global:T.secSessions -Inner $inner -Count $range) -Width $Width))
 
     if ($sessions.Count -eq 0) {
         $lines.Add((New-ChRow -Content ('  ' + $global:C.Dim + ('  ' + $global:T.noSessions)) -Width $Width))
@@ -590,14 +653,15 @@ function Build-ChDetailLines {
             }
         } else {
             $content = $marker + $global:C.White + $title.PadRight($titleW) + $global:C.Reset + '  ' +
-                       $global:C.Dim + $when.PadRight($dateW) + $dur.PadLeft($durW) + $global:C.Reset
+                       (Get-ChDateColour $s.LastActivity) + $when.PadRight($dateW) + $global:C.Reset +
+                       $global:C.Dim + $dur.PadLeft($durW) + $global:C.Reset
             $lines.Add((New-ChRow -Content $content -Width $Width))
         }
     }
 
     if ($memShown -gt 0) {
         $lines.Add((New-ChRow -Content '' -Width $Width))
-        $lines.Add((New-ChRow -Content ('  ' + $global:C.Bold + $global:T.secMemory + $global:C.Reset + $global:C.Dim + " ($memCount)") -Width $Width))
+        $lines.Add((New-ChRow -Content (New-ChSectionHeading -Text $global:T.secMemory -Inner $inner -Count "($memCount)") -Width $Width))
         $shown = @($Memory | Select-Object -First $memShown)
         foreach ($m in $shown) {
             $txt = $m.Title
@@ -646,7 +710,13 @@ function Build-ChSearchLines {
 
     $inner = $Width - 2
     $lines = New-Object System.Collections.Generic.List[string]
-    $lines.Add((New-ChTopBorder -Left $global:T.searchTitle -Right ($global:T.searchOf -f $Results.Count, $Total) -Width $Width))
+    $badge = $global:T.searchOf -f $Results.Count, $Total
+    $vis = [int][Math]::Floor((($Height - 3) - 3) / 2)
+    if ($Results.Count -gt $vis -and $vis -gt 0) {
+        $last = [Math]::Min($Results.Count, $Scroll + $vis)
+        $badge = "$($Scroll + 1)-$last $($global:G.Dot) $badge"
+    }
+    $lines.Add((New-ChTopBorder -Left $global:T.searchTitle -Right $badge -Width $Width))
 
     $caret = $global:C.Yellow + '_' + $global:C.Reset
     $lines.Add((New-ChRow -Content ('  ' + $global:C.Dim + $global:T.searchText + $global:C.White + $Query + $caret) -Width $Width))
@@ -675,7 +745,7 @@ function Build-ChSearchLines {
         if ($r.LastActivity) { $when = Format-ChRelativeDate $r.LastActivity }
         $context = $r.RepoName + '  ' + $global:G.Dot + '  ' + $when
         if ($r.Session.Branch) { $context += '  ' + $global:G.Dot + '  ' + $r.Session.Branch }
-        $lines.Add((New-ChRow -Content ('     ' + $global:C.Dim + (Limit-ChText $context ($inner - 6))) -Width $Width))
+        $lines.Add((New-ChRow -Content ('     ' + (Get-ChDateColour $r.LastActivity) + (Limit-ChText $context ($inner - 6))) -Width $Width))
     }
 
     $keys = '  ' + $global:C.Dim + $global:T.searchType + '   ' +

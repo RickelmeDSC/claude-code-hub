@@ -9,55 +9,64 @@ Written in PowerShell 5.1 — the one that already ships with Windows. No instal
 beyond cloning, and no dependencies other than `git`, `gh` and `claude` themselves.
 
 ```
-┌─ CLAUDE HUB ────────────────────────────────────────────────────────────────── demo-user ┐
-│   REPOSITORY                                       BRANCH              SESS  ACTIVITY    │
+╭─ CLAUDE HUB ─────────────────────────────────────────── demo-user • 8 repos • 6 sessions ╮
+│   REPOSITORY                                     BRANCH              SESS  ACTIVITY      │
 │                                                                                          │
-│ ▸ alpha-worktree                               ✓   main                ·     today 13:43 │
-│   alpha                                        ✓   main                4     14/08 09:00 │
-│   beta                                         ↑   main                1     13/08 09:45 │
-│   gamma                                        ✓   feature/x           ·     12/08 09:00 │
-│   never-cloned                                 ·                       ·     11/08 09:00 │
-│   old-thing                                    ·   archived            ·     01/01/25    │
+│ ▸ alpha-worktree                             ✓   main                ·     today 09:31   │
+│   alpha                                      ✓   main                4     14/08 09:00   │
+│   beta                                       ↑   main                1     13/08 09:45   │
+│   gamma                                      ✓   feature/x           ·     12/08 09:00   │
+│   never-cloned                               ·                       ·     11/08 09:00   │
+│   secret-lab                                 ·                       ·     01/01 09:00   │
+│   old-thing                                  ·   archived            ·     01/01/25      │
 │  ─── other places with history                                                           │
-│   home                                         ✓                       1     14/08 09:11 │
+│   home                                       ✓                       1     14/08 09:11   │
 │                                                                                          │
 │  ↑↓ navigate   Enter open   / repo   s search sessions   r reload   q quit               │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
+╰──────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 Enter on a repository gives you its history and its memory:
 
 ```
-┌─ demo-user/alpha ────────────────────────────────────────────────────────────────── main ┐
-│  C:\code\alpha                                            3 changed, 2 to push           │
+╭─ demo-user/alpha ────────────────────────────────────────────────────────────────── main ╮
+│  C:\ch-demo\code\alpha                                                                   │
 │  Demo repository                                                                         │
 │                                                                                          │
-│  SESSIONS (4)                                                                            │
+│  SESSIONS (4) ─────────────────────────────────────────────────────────────────────────  │
 │ ▸ please review the deployment pipeline configuration for staging   12/08 09:20     20min│
 │   Refactor the parser                                               11/08 09:08      8min│
 │   Fix the login timeout                                             10/08 11:14      2h14│
 │   (no conversation)                                                 09/08 07:00     <1min│
 │                                                                                          │
-│  MEMORY (3)                                                                              │
+│  MEMORY (3) ───────────────────────────────────────────────────────────────────────────  │
 │   • Deploy is manual - the pipeline builds but never publishes                           │
 │   • No staging database - every test runs against a local copy                           │
 │   • Parser owns tokenization - do not tokenize in the reader                             │
+│                                                                                          │
 │  Enter resume  n new  c continue  m memory  e folder  v code  Esc back                   │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
+╰──────────────────────────────────────────────────────────────────────────────────────────╯
 ```
+
+On a real clone the path line also carries what `git status` reports — something like
+`3 changed, 2 to push`. The fixtures above are plain folders, so there is nothing for git
+to say about them.
 
 `s` searches every conversation you ever had, across all repositories — the answer to
 *"which repo was I doing that in?"*:
 
 ```
-┌─ SEARCH SESSIONS ──────────────────────────────────────────────────────────────── 1 of 6 ┐
+╭─ SEARCH SESSIONS ──────────────────────────────────────────────────────────────── 1 of 6 ╮
 │  text: deploy_                                                                           │
 │                                                                                          │
 │ ▸ please review the deployment pipeline configuration for staging                        │
 │     alpha  •  12/08 09:20  •  main                                                       │
 │                                                                                          │
+│                                                                                          │
+│                                                                                          │
+│                                                                                          │
 │  type to filter   Enter resume   ↑↓ navigate   Esc back                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
+╰──────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 Those are real frames rendered from the test fixtures. `ch --preview` draws them for you.
@@ -154,11 +163,17 @@ your conversations.
 
 ## Performance
 
+Measured with 16 local clones and 48 sessions:
+
 | Moment | Time |
 |---|---|
-| First `ch` in a window | ~2.4 s |
-| Later `ch` in the same window | ~440 ms |
+| First `ch` in a window | ~2.0 s |
+| Later `ch` in the same window | ~640 ms |
 | `ch --reindex` | ~5 s |
+
+The session index is cached and costs ~70 ms once warm, whatever the size of your
+history. What grows with your machine is the repository scan: about 10 ms per local
+clone, because each one is asked for its branch and its sync state.
 
 The first version took 6–10 seconds to open. Three measurements fixed that, and two of
 them contradicted the assumption that prompted the measuring in the first place. They are
